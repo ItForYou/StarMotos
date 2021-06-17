@@ -13,11 +13,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Message;
+import android.os.Parcelable;
 import android.os.StrictMode;
 import android.provider.MediaStore;
-import android.support.annotation.RequiresApi;
-import android.support.v4.app.ActivityCompat;
-import android.support.v7.app.AppCompatActivity;
+
 import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
@@ -26,6 +25,8 @@ import android.webkit.CookieSyncManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.JavascriptInterface;
 import android.webkit.JsResult;
+import android.webkit.ValueCallback;
+import android.webkit.WebBackForwardList;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -37,7 +38,9 @@ import android.widget.RelativeLayout;
 import android.widget.Toast;
 
 
-
+import androidx.annotation.RequiresApi;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
 
 import java.io.File;
 import java.lang.reflect.Method;
@@ -53,15 +56,30 @@ import util.NetworkCheck;
 
 
 public class MainActivity extends AppCompatActivity {
+    final int FILECHOOSER_NORMAL_REQ_CODE = 1200, FILECHOOSER_LOLLIPOP_REQ_CODE = 1300;
+    BackPressCloseHandler backPressCloseHandler = new BackPressCloseHandler(this);
+    ValueCallback<Uri> filePathCallbackNormal;
+    ValueCallback<Uri[]> filePathCallbackLollipop;
+    Uri mCapturedImageURI;
+    // 파일 업로드용
+    private static final String TYPE_IMAGE = "image/*";
+    private static final int INPUT_FILE_REQUEST_CODE = 1;
+    private ValueCallback<Uri> mUploadMessage;
+    private ValueCallback<Uri[]> mFilePathCallback;
+    private String mCameraPhotoPath;
     LinearLayout webLayout;
-    RelativeLayout networkLayout;
+
     public static WebView webView;
-    NetworkCheck netCheck;
+
     Button replayBtn;
     ProgressBar loadingProgress;
     public static boolean execBoolean = true;
-    private BackPressCloseHandler backPressCloseHandler;
+
+    // push 토큰체크
+    int sendTokenChk = 0;
+
     boolean isIndex = true;
+    boolean isSrch = false;
     private final int AUDIO_RECORED_REQ_CODE=1500,SNS_REQ_CODE=2000;
     String firstUrl = "";
     final int REQUEST_IMAGE_CODE = 1010;
@@ -79,7 +97,7 @@ public class MainActivity extends AppCompatActivity {
         mContext=this;
         mActivity=this;
         //스크린샷 했을 때 빈화면이 나오게
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
+        //getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         //화면을 계속 켜짐
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if(Build.VERSION.SDK_INT>=24){
@@ -110,7 +128,7 @@ public class MainActivity extends AppCompatActivity {
 
     //레이아웃 설정
     public void setLayout() {
-        networkLayout = (RelativeLayout) findViewById(R.id.networkLayout);//네트워크 연결이 끊겼을 때 레이아웃 가져오기
+
         webLayout = (LinearLayout) findViewById(R.id.webLayout);//웹뷰 레이아웃 가져오기
         loadingProgress = (ProgressBar)findViewById(R.id.loadingProgress);
 
@@ -119,8 +137,8 @@ public class MainActivity extends AppCompatActivity {
         webView.loadUrl(firstUrl);
         webViewSetting();
 
-
-
+        // push
+        Common.setTOKEN(this);
     }
     //갤러리 온클릭리스너 만들기
 
@@ -138,27 +156,21 @@ public class MainActivity extends AppCompatActivity {
         setting.setJavaScriptEnabled(true);//자바스크립트 사용여부
         setting.setSupportMultipleWindows(false);//윈도우 창 여러개를 사용할 것인지의 여부 무조건 false로 하는 게 좋음
         setting.setUseWideViewPort(true);//웹에서 view port 사용여부
+        webView.getSettings().setSupportZoom(true);
+        webView.getSettings().setBuiltInZoomControls(true);
+        webView.getSettings().setDisplayZoomControls(false);
         webView.setWebChromeClient(chrome);//웹에서 경고창이나 또는 컴펌창을 띄우기 위한 메서드
         webView.setWebViewClient(client);//웹페이지 관련된 메서드 페이지 이동할 때 또는 페이지가 로딩이 끝날 때 주로 쓰임
 
-        setting.setUserAgentString("factstaock");
+        //setting.setUserAgentString("factstaock");
+        setting.setUserAgentString(setting.getUserAgentString() + "INAPP/APP_VER=9");
         webView.addJavascriptInterface(new WebJavascriptEvent(), "Android");
 
-        //네트워크 체킹을 할 때 쓰임
-        netCheck = new NetworkCheck(this, this);
-        netCheck.setNetworkLayout(networkLayout);
-        netCheck.setWebLayout(webLayout);
-        netCheck.networkCheck();
+
         //뒤로가기 버튼을 눌렀을 때 클래스로 제어함
         backPressCloseHandler = new BackPressCloseHandler(this);
 
-        replayBtn=(Button)findViewById(R.id.replayBtn);
-        replayBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                netCheck.networkCheck();
-            }
-        });
+
     }
 
     WebChromeClient chrome;
@@ -176,6 +188,7 @@ public class MainActivity extends AppCompatActivity {
             public boolean onJsAlert(WebView view, String url, String message, final JsResult result) {
                 new AlertDialog.Builder(MainActivity.this)
                         .setMessage("\n" + message + "\n")
+                        .setCancelable(false)
                         .setPositiveButton("확인",
                                 new DialogInterface.OnClickListener() {
                                     @Override
@@ -193,6 +206,7 @@ public class MainActivity extends AppCompatActivity {
                                        final JsResult result) {
                 new AlertDialog.Builder(MainActivity.this)
                         .setMessage("\n" + message + "\n")
+                        .setCancelable(false)
                         .setPositiveButton("확인",
                                 new DialogInterface.OnClickListener() {
                                     @Override
@@ -238,6 +252,69 @@ public class MainActivity extends AppCompatActivity {
                 AlertDialog alert = builder.create();
                 alert.show();
             }
+            // For Android < 3.0
+            public void openFileChooser(ValueCallback<Uri> uploadMsg) {
+                openFileChooser(uploadMsg, "");
+            }
+
+            // For Android 3.0+
+            public void openFileChooser(ValueCallback<Uri> uploadMsg, String acceptType) {
+                filePathCallbackNormal = uploadMsg;
+                Log.d("iii","111");
+                Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.setType("image/*");
+                startActivityForResult(Intent.createChooser(i, "File Chooser"), FILECHOOSER_NORMAL_REQ_CODE);
+            }
+
+            // For Android 4.1+
+            public void openFileChooser(ValueCallback<Uri> uploadMsg, String acceptType, String capture) {
+                Log.d("iii","222");
+                openFileChooser(uploadMsg, acceptType);
+            }
+
+
+            // For Android 5.0+
+            public boolean onShowFileChooser(
+                    WebView webView, ValueCallback<Uri[]> filePathCallback,
+                    FileChooserParams fileChooserParams) {
+
+                Log.d("iii","333");
+                if (filePathCallbackLollipop != null) {
+//                    filePathCallbackLollipop.onReceiveValue(null);
+                    filePathCallbackLollipop = null;
+                }
+                filePathCallbackLollipop = filePathCallback;
+
+
+                // Create AndroidExampleFolder at sdcard
+                File imageStorageDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "AndroidExampleFolder");
+                if (!imageStorageDir.exists()) {
+                    // Create AndroidExampleFolder at sdcard
+                    imageStorageDir.mkdirs();
+                }
+
+                // Create camera captured image file path and name
+                File file = new File(imageStorageDir + File.separator + "IMG_" + String.valueOf(System.currentTimeMillis()) + ".jpg");
+                mCapturedImageURI = Uri.fromFile(file);
+
+                Intent captureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                captureIntent.putExtra(MediaStore.EXTRA_OUTPUT, mCapturedImageURI);
+
+                Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.setType("image/*");
+
+                // Create file chooser intent
+                Intent chooserIntent = Intent.createChooser(i, "Image Chooser");
+                // Set camera intent to file chooser
+                chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Parcelable[]{captureIntent});
+
+                // On select image call onActivityResult method of activity
+                startActivityForResult(chooserIntent, FILECHOOSER_LOLLIPOP_REQ_CODE);
+                return true;
+
+            }
 
 
         };
@@ -250,7 +327,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 loadingProgress.setVisibility(View.VISIBLE);
-                Log.d("url",url);
+                Log.d("로그:url",url);
 
                 if (url.startsWith("tel")) {
                     Intent intent = new Intent(Intent.ACTION_DIAL);
@@ -276,7 +353,7 @@ public class MainActivity extends AppCompatActivity {
 
 
 
-                }else if(url.startsWith("https://open")){
+                }/*else if(url.startsWith("https://open")){
                     loadingProgress.setVisibility(View.GONE);
                     Intent intent = new Intent(Intent.ACTION_VIEW,Uri.parse(url));
                     intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY|Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
@@ -317,7 +394,7 @@ public class MainActivity extends AppCompatActivity {
                         Log.d("error1",e.toString());
                         e.printStackTrace();
                     }
-                }
+                }*/
 
 
                 return false;
@@ -328,24 +405,43 @@ public class MainActivity extends AppCompatActivity {
                 super.onPageFinished(view, url);
                 //webLayout.setRefreshing(false);
                 loadingProgress.setVisibility(View.GONE);
-                Log.d("url",url);
+
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
                     CookieSyncManager.getInstance().sync();
                 } else {
                     CookieManager.getInstance().flush();
                 }
                 Log.d("mb_id",Common.getPref(MainActivity.this,"ss_mb_id",""));
+
                 //로그인할 때
+                /*
                 if(url.startsWith(getString(R.string.domain)+"bbs/login.php")||url.startsWith(getString(R.string.domain)+"bbs/register_form.php")){
                     view.loadUrl("javascript:fcmKey('"+ Common.TOKEN+"')");
                 }
-                if (url.equals(getString(R.string.url)) || url.equals(getString(R.string.domain))||url.equals(getString(R.string.url)+"bbs/board.php?bo_table=short")||url.startsWith(getString(R.string.domain)+"bbs/login.php")) {
+                 */
+
+                if (url.equals(getString(R.string.url)) || url.equals(getString(R.string.domain)) || url.startsWith(getString(R.string.domain)+"bbs/login.php")) {
                     isIndex=true;
                 } else {
                     isIndex=false;
                 }
 
+                // 로그인 이후 푸시토큰 체크
+                if (isIndex && sendTokenChk < 5) {
+                    Log.d("로그::TOKEN", Common.TOKEN);
+                    webView.loadUrl("javascript:fcmKey('"+ Common.TOKEN +"')");
+                    sendTokenChk++;
+                }
+
+                // 하바계산기 검색페이지
+                if (url.contains("q=") && !url.contains("wr_id=") && (url.contains("bo_table=purchase") || url.contains("bo_table=sales"))) {
+                    isSrch = true;
+                } else {
+                    isSrch = false;
+                }
+                 //Log.d("로그:onPageFinished()", url);
             }
+
             //페이지 오류가 났을 때 6.0 이후에는 쓰이지 않음
             @Override
             public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
@@ -421,7 +517,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        netCheck.stopReciver();
+
         // unregisterReceiver(receiver);
 
 
@@ -430,32 +526,102 @@ public class MainActivity extends AppCompatActivity {
     public void onBackPressed() {
         //super.onBackPressed();
         //웹뷰에서 히스토리가 남아있으면 뒤로가기 함
-        Log.d("isIndex",isIndex+"");
+        Log.d("로그:isIndex",isIndex+"");
+
+        WebBackForwardList historyList = webView.copyBackForwardList();
+        String currentUrl = webView.getUrl();
+
         if(!isIndex) {
-            if (webView.canGoBack()) {
+            if (webView.canGoBack()) {  // 뒤로가기가 있으면 뒤로
+                String backTargetUrl = historyList.getItemAtIndex(historyList.getCurrentIndex() - 1).getUrl();
+
+                Log.d("로그:현재",currentUrl+"");
+                Log.d("로그:뒤로가기",backTargetUrl+"");
+
+                // 210129 하바계산기-매입 추가
+                if ( (currentUrl.contains("bo_table=purchase") && !currentUrl.contains("wr_id="))) {    //  1) 매입-목록에서
+                    if (backTargetUrl.contains("#new") || backTargetUrl.contains("haba_stock_list.php")) {   // 뒤로가기시 새로고침대신 index 보내기
+                        webView.clearHistory();
+                        //webView.loadUrl(backTargetUrl.replace("#new", ""));
+                        webView.loadUrl(getString(R.string.url));
+                        return;
+                    }
+                } else if (currentUrl.contains("haba_stock_list.php")) {                                 // 2) 매입-재고목록에서
+                    if (backTargetUrl.contains("#new") || backTargetUrl.contains("bo_table=purchase")) {   // 뒤로가기시 새로고침대신 index 보내기
+                        webView.clearHistory();
+                        webView.loadUrl(getString(R.string.url)+"bbs/board.php?bo_table=purchase");
+                        return;
+                    }
+                }
+
+                if (isSrch) {
+                    isSrch = false;
+                    String bo_table = (currentUrl.contains("purchase"))? "purchase" : "sales";
+                    webView.loadUrl(getString(R.string.url) + "bbs/board.php?bo_table=" + bo_table);
+                    return;
+                }
+
                 webView.goBack();
-            } else if (webView.canGoBack() == false) {
-                backPressCloseHandler.onBackPressed();
+
+            } else {
+                // 하바계산기 뒤로가기 없으면 인덱스로 보내기
+                if (currentUrl.contains("bo_table=purchase") || currentUrl.contains("bo_table=sale")) { // 매입-목록
+                    webView.loadUrl(getString(R.string.url));
+                } else if (currentUrl.contains("haba_stock_list.php")) {    // 매입-재고목록
+                    webView.loadUrl(getString(R.string.url)+"bbs/board.php?bo_table=purchase");
+                } else {
+                    backPressCloseHandler.onBackPressed();
+                }
             }
+
         }else{
             backPressCloseHandler.onBackPressed();
         }
     }
     //로그인 로그아웃
     class WebJavascriptEvent{
-
-
         @JavascriptInterface
         public void setLogin(String mb_id){
-            Log.d("login","로그인");
+            Log.d("로그:login","로그인");
             Common.savePref(getApplicationContext(),"ss_mb_id",mb_id);
         }
         @JavascriptInterface
         public void setLogout(){
-            Log.d("logout","로그아웃");
+            Log.d("로그:logout","로그아웃");
             Common.savePref(getApplicationContext(),"ss_mb_id","");
         }
     }
+    // input file 클릭시 호출함수
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode == RESULT_OK) {
+            if (requestCode == FILECHOOSER_NORMAL_REQ_CODE) {
+                if (filePathCallbackNormal == null) return;
+                Uri result = (data == null || resultCode != RESULT_OK) ? null : data.getData();
+                filePathCallbackNormal.onReceiveValue(result);
+                filePathCallbackNormal = null;
 
+            } else if (requestCode == FILECHOOSER_LOLLIPOP_REQ_CODE) {
+                Uri[] result = new Uri[0];
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    if (resultCode == RESULT_OK) {
+                        result = (data == null) ? new Uri[]{mCapturedImageURI} : WebChromeClient.FileChooserParams.parseResult(resultCode, data);
+                    }
+                    filePathCallbackLollipop.onReceiveValue(result);
+                }
+            }
+        } else {
+            try {
+                if (filePathCallbackLollipop != null) {
+                    filePathCallbackLollipop.onReceiveValue(null);
+                    filePathCallbackLollipop = null;
+                    webView.loadUrl("javascript:removeInputFile()");
+                }
+            } catch (Exception e) {
+
+            }
+        }
+    }
 
 }

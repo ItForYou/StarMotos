@@ -10,8 +10,16 @@ import android.os.Environment;
 import android.util.Log;
 import android.view.View;
 
+import com.dreamforone.starmotos.R;
+import com.google.android.gms.tasks.OnCompleteListener;
+import com.google.android.gms.tasks.Task;
+import com.google.firebase.iid.FirebaseInstanceId;
+import com.google.firebase.iid.InstanceIdResult;
+
 import java.io.File;
 import java.io.FileOutputStream;
+
+import androidx.annotation.NonNull;
 
 /**
  * Created by 투덜이2 on 2017-07-14.
@@ -108,6 +116,25 @@ public class Common {
         }catch (Exception e){
             Log.d("screen-error",e.toString());
         }
+    }
 
+    public static void setTOKEN(final Activity mActivity){
+        FirebaseInstanceId.getInstance().getInstanceId()
+                .addOnCompleteListener(new OnCompleteListener<InstanceIdResult>() {
+                    @Override
+                    public void onComplete(@NonNull Task<InstanceIdResult> task) {
+                        if (!task.isSuccessful()) {
+                            Log.w("setTOKEN", "getInstanceId failed", task.getException());
+                            return;
+                        }
+
+                        // Get new Instance ID token
+                        Common.TOKEN = task.getResult().getToken();
+
+                        // Log and toast
+                        String msg = mActivity.getString(R.string.msg_token_fmt, Common.TOKEN);
+                        Log.d("로그::setTOKEN", msg);
+                    }
+                });
     }
 }

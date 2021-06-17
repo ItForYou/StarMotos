@@ -9,8 +9,9 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.provider.Settings;
-import android.support.v7.app.AppCompatActivity;
 import android.widget.Toast;
+
+import androidx.appcompat.app.AppCompatActivity;
 
 import util.LocationPosition;
 
@@ -30,14 +31,15 @@ public class SplashActivity extends AppCompatActivity {
 
 
         //버전별 체크를 한 후 마시멜로 이상이면 퍼미션 체크 여부
-        try {
+        /*try {
             if (Build.VERSION.SDK_INT >= 23) {
                 checkPermission();
             } else {
                 goHandler();
             }
         } catch (Exception e) {
-        }
+        }*/
+        goHandler();
     }
     @TargetApi(Build.VERSION_CODES.M)
     public void checkPermission(){
